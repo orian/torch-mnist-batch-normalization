@@ -20,6 +20,7 @@ cmd:option('-weightDecay', 0.0, 'weight decay')
 cmd:option('-momentum', 0.0, 'number of epochs')
 cmd:option('-cuda', false, 'use CUDA')
 cmd:option('-retrain', '', 'a model to load')
+cmd:option('-onlyconv', false, 'only convolution')
 opt = cmd:parse(arg)
 
 print(opt)
@@ -51,22 +52,48 @@ testData.labels = testData.labels:type(defTensorType)
 
 classes = {'1','2','3','4','5','6','7','8','9','0'}
 
-function CreateConvModel()
+function CreateConvModel(mode)
     local model=nn.Sequential();
     -- nInputPlane, nOutputPlane, kW, kH, [dW], [dH],  [padding]
+    -- if mode == 1 then
+    --   model:add(nn.SpatialBatchNormalization(3))
+    -- end
     model:add(nn.SpatialConvolutionMM(1, 32, 4, 4)) -- output size: 29x29
+    if mode == 2 then
+      model:add(nn.SpatialBatchNormalization(32))
+    end
     model:add(nn.ReLU(true))
     model:add(nn.SpatialMaxPooling(2, 2, 2, 2)) -- output size 14x14
+
     -- stage 2 : mean suppresion -> filter bank -> squashing -> max pooling
+    if mode == 1 then
+      model:add(nn.SpatialBatchNormalization(32))
+    end
     model:add(nn.SpatialConvolutionMM(32, 64, 5, 5)) -- output size: 10x10
+    if mode == 2 then
+      model:add(nn.SpatialBatchNormalization(64))
+    end
     model:add(nn.ReLU(true))
     model:add(nn.SpatialMaxPooling(2, 2, 2, 2)) -- 5x5
+
+    if mode == 1 then
+      model:add(nn.SpatialBatchNormalization(64))
+    end
     -- stage 3 : standard 2-layer model:
     model:add(nn.View(64*5*5))
     model:add(nn.Linear(64*5*5, 200))
-
+    if mode == 2 then
+      model:add(nn.BatchNormalization(200))
+    end
     model:add(nn.ReLU(true))
+
+    if mode == 1 then
+      model:add(nn.BatchNormalization(200))
+    end
     model:add(nn.Linear(200, #classes))
+    if mode == 2 then
+      model:add(nn.BatchNormalization(#classes))
+    end
     local criterion = nn.CrossEntropyCriterion()
     return model, criterion
 end
@@ -196,17 +223,29 @@ function train(model, criterion, learningRate)
   return costs
 end
 
-local learningRates = {0.5, 1.3, 1.3, 0.5}
+local learningRates = {0.5, 1.3, 1.3, 0.5,1.3,1.3}
 local costs = {}
-for i = 0,2 do
-  local model,criterion = CreateSimpleModel(i)
-  table.insert(costs, train(model, criterion, learningRates[i+1]))
+if not opt.onlyconv then
+  for i = 0,2 do
+    local model,criterion = CreateSimpleModel(i)
+    table.insert(costs, train(model, criterion, learningRates[i+1]))
+  end
 end
-local model, criterion = CreateConvModel()
-table.insert(costs, train(model, criterion, learningRates[4]))
+
+for i=0,2 do
+  local model, criterion = CreateConvModel(i)
+  table.insert(costs, train(model, criterion, learningRates[i+4]))
+end
 
 costs = torch.FloatTensor(costs)
 torch.setdefaulttensortype('torch.FloatTensor')
-gnuplot.plot({'Full',costs[1]},{'BN input',costs[2]}, {'BN before sigmoid',costs[3]}, {'ConvNet', costs[4]})
-gnuplot.plotflush()
-gnuplot.title('Errors in epochs')
+if opt.onlyconv then
+  gnuplot.plot({'Conv',costs[1]},{'Conv before',costs[2]}, {'Conv after',costs[3]})
+  gnuplot.plotflush()
+  gnuplot.title('Errors in epochs')
+else
+  gnuplot.plot({'Full',costs[1]},{'BN input',costs[2]}, {'BN before sigmoid',costs[3]},
+               {'ConvNet', costs[4]}, {'Conv before',costs[5]}, {'Conv after',costs[6]})
+  gnuplot.plotflush()
+  gnuplot.title('Errors in epochs')
+end
