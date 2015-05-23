@@ -8,3 +8,5 @@ The main difference is the data, MNIST dataset I use has pictures of size 32x32p
 *Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift*
 by Sergey Ioffe, Christian Szegedy (11 Feb 2015)
 http://arxiv.org/abs/1502.03167
+
+![Example results](bn-graph.png)
