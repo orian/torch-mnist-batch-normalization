@@ -12,7 +12,6 @@ cmd:text('MNIST Batch Normalization example')
 cmd:text()
 cmd:text('Options:')
 cmd:option('-printEverySec', 30, 'print interval')
-cmd:option('-save', fname:gsub('.lua',''), 'subdirectory to save/log experiments in')
 cmd:option('-batch_size', 32, 'how big batch to use')
 cmd:option('-max_epoch', 100, 'number of epochs')
 cmd:option('-learningRate', 0.1, 'learning rate')
@@ -21,6 +20,7 @@ cmd:option('-momentum', 0.0, 'number of epochs')
 cmd:option('-cuda', false, 'use CUDA')
 cmd:option('-retrain', '', 'a model to load')
 cmd:option('-onlyconv', false, 'only convolution')
+cmd:option('-onlyfull', false, 'only full models')
 opt = cmd:parse(arg)
 
 print(opt)
@@ -101,6 +101,7 @@ end
 -- mode 0 linear, 1 BatchNormalization for layer input, 2 BN for nonlinearity
 -- function input.
 function CreateSimpleModel(mode)
+    torch.setdefaulttensortype('torch.FloatTensor')
     after = after or false
     ----------------------------------------------------------------------
     -- define model to train
@@ -115,6 +116,10 @@ function CreateSimpleModel(mode)
     if mode == 1 then
       model:add(nn.BatchNormalization(inSize))
     end
+    if mode == 3 then
+      model:add(nn.Add(inSize))
+      model:add(nn.CMul(inSize))
+    end
     model:add(nn.Linear(inSize, nHidden))
     if mode == 2 then
       model:add(nn.BatchNormalization(nHidden))
@@ -126,6 +131,10 @@ function CreateSimpleModel(mode)
       if mode == 1 then
         model:add(nn.BatchNormalization(nHidden))
       end
+      if mode == 3 then
+        model:add(nn.Add(nHidden))
+        model:add(nn.CMul(nHidden))
+      end
       model:add(nn.Linear(nHidden, nHidden))
       if mode == 2 then
         model:add(nn.BatchNormalization(nHidden))
@@ -136,6 +145,10 @@ function CreateSimpleModel(mode)
     if mode == 1 then
       model:add(nn.BatchNormalization(nHidden))
     end
+    if mode == 3 then
+      model:add(nn.Add(nHidden))
+      model:add(nn.CMul(nHidden))
+    end
     model:add(nn.Linear(nHidden, #classes))
     if mode == 2 then
       model:add(nn.BatchNormalization(#classes))
@@ -143,6 +156,10 @@ function CreateSimpleModel(mode)
     model:add(nn.Sigmoid())
 
     local criterion = nn.CrossEntropyCriterion()
+    if opt.cuda then
+      torch.setdefaulttensortype('torch.CudaTensor')
+      return model:cuda(), criterion:cuda()
+    end
     return model, criterion
 end
 
@@ -223,24 +240,34 @@ function train(model, criterion, learningRate)
   return costs
 end
 
-local learningRates = {0.5, 1.3, 1.3, 0.5,1.3,1.3}
+local learningRates = {0.5, 1.3, 1.3, 0.5, 0.5,1.3,1.3}
 local costs = {}
 if not opt.onlyconv then
-  for i = 0,2 do
+  for i = 3,3 do
     local model,criterion = CreateSimpleModel(i)
     table.insert(costs, train(model, criterion, learningRates[i+1]))
   end
 end
 
-for i=0,2 do
-  local model, criterion = CreateConvModel(i)
-  table.insert(costs, train(model, criterion, learningRates[i+4]))
+if not opt.onlyfull then
+  for i=0,2 do
+    local model, criterion = CreateConvModel(i)
+    table.insert(costs, train(model, criterion, learningRates[i+4]))
+  end
 end
 
 costs = torch.FloatTensor(costs)
 torch.setdefaulttensortype('torch.FloatTensor')
+fn=os.date('%d_%m_%y %H_%M.png')
+print('saving plot into: '..fn)
+gnuplot.pngfigure(fn)
 if opt.onlyconv then
   gnuplot.plot({'Conv',costs[1]},{'Conv before',costs[2]}, {'Conv after',costs[3]})
+  gnuplot.plotflush()
+  gnuplot.title('Errors in epochs')
+elseif opt.onlyfull then
+  gnuplot.plot({'Full',costs[1]},{'BN input',costs[2]}, {'BN before sigmoid',costs[3]},
+               {'MulAdd',costs[4]})
   gnuplot.plotflush()
   gnuplot.title('Errors in epochs')
 else
